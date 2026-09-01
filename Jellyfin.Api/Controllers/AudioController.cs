@@ -8,6 +8,7 @@ using Jellyfin.Api.Models.StreamingDtos;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Streaming;
 using MediaBrowser.Model.Dlna;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -16,6 +17,7 @@ namespace Jellyfin.Api.Controllers;
 /// <summary>
 /// The audio controller.
 /// </summary>
+[Authorize]
 public class AudioController : BaseJellyfinApiController
 {
     private readonly AudioHelper _audioHelper;
