@@ -192,18 +192,11 @@ namespace Emby.Server.Implementations.Library
                 }
                 else
                 {
-                    var userDataRow = ResolveUserDataRow(item, item.UserData?.Where(e => e.UserId.Equals(user.Id)));
-                    var userData = userDataRow is not null ? Map(userDataRow) : null;
-                    if (userData is not null)
-                    {
-                        result[item.Id] = userData;
-                        _cache.AddOrUpdate(cacheKey, userData);
-                    }
-                    else
-                    {
-                        var keys = item.GetUserDataKeys();
-                        itemsNeedingQuery.Add((item, keys));
-                    }
+                    // Same reasoning as GetUserData: item.UserData is a per-instance snapshot, so it
+                    // must not seed the cache or a stale value becomes authoritative for every later
+                    // reader. Anything not already cached is resolved by the batched query below,
+                    // which is issued once regardless of how many items land in it.
+                    itemsNeedingQuery.Add((item, item.GetUserDataKeys()));
                 }
             }
 
@@ -353,10 +346,57 @@ namespace Emby.Server.Implementations.Library
         public UserItemData? GetUserData(User user, BaseItem item)
         {
             ArgumentNullException.ThrowIfNull(user);
-            var row = ResolveUserDataRow(item, item.UserData?.Where(e => e.UserId.Equals(user.Id)));
-            return row is not null ? Map(row) : new UserItemData()
+            ArgumentNullException.ThrowIfNull(item);
+
+            // Deliberately not read from item.UserData: that array is a snapshot taken when the
+            // BaseItem instance was materialised, and instances outlive their entry in the library
+            // cache (SessionInfo.FullNowPlayingItem pins one for a whole playback session). Reading
+            // it lets a write made through a newer instance be silently reverted by a later
+            // read-modify-write through the pinned one. The cache below is keyed by user and item,
+            // so it stays coherent no matter which instance the caller holds.
+            var cacheKey = GetCacheKey(user.InternalId, item.Id);
+            if (_cache.TryGet(cacheKey, out var cached))
+            {
+                return Clone(cached);
+            }
+
+            using var dbContext = _repository.CreateDbContext();
+            var rows = dbContext.UserData
+                .AsNoTracking()
+                .Where(e => e.ItemId == item.Id && e.UserId == user.Id)
+                .ToArray();
+
+            var row = ResolveUserDataRow(item, rows);
+            var userData = row is not null ? Map(row) : new UserItemData()
             {
                 Key = item.GetUserDataKeys()[0],
+            };
+
+            _cache.AddOrUpdate(cacheKey, userData);
+
+            return Clone(userData);
+        }
+
+        /// <summary>
+        /// Returns a detached copy so callers that mutate the result before saving it do not write
+        /// through to the cached instance.
+        /// </summary>
+        /// <param name="userData">The user data to copy.</param>
+        /// <returns>A copy of <paramref name="userData"/>.</returns>
+        private static UserItemData Clone(UserItemData userData)
+        {
+            return new UserItemData()
+            {
+                Key = userData.Key,
+                AudioStreamIndex = userData.AudioStreamIndex,
+                IsFavorite = userData.IsFavorite,
+                LastPlayedDate = userData.LastPlayedDate,
+                Likes = userData.Likes,
+                PlaybackPositionTicks = userData.PlaybackPositionTicks,
+                PlayCount = userData.PlayCount,
+                Played = userData.Played,
+                Rating = userData.Rating,
+                SubtitleStreamIndex = userData.SubtitleStreamIndex,
             };
         }
 
