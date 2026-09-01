@@ -748,6 +748,89 @@ public partial class TrickplayManager : ITrickplayManager
     }
 
     /// <inheritdoc />
+    public IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>> GetTrickplayManifestBatch(IReadOnlyList<BaseItem> items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+
+        var result = new Dictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>();
+        if (items.Count == 0)
+        {
+            return result;
+        }
+
+        // Trickplay rows are keyed by media source id, so collect every local source up front and
+        // resolve them all in one query rather than one query per source per item.
+        var sourcesByItem = new Dictionary<Guid, List<(string SourceKey, Guid SourceId)>>();
+        var sourceIds = new List<Guid>();
+        foreach (var item in items)
+        {
+            foreach (var mediaSource in item.GetMediaSources(false))
+            {
+                if (mediaSource.IsRemote || !Guid.TryParse(mediaSource.Id, out var mediaSourceId))
+                {
+                    continue;
+                }
+
+                if (!sourcesByItem.TryGetValue(item.Id, out var sources))
+                {
+                    sources = new List<(string, Guid)>();
+                    sourcesByItem[item.Id] = sources;
+                }
+
+                sources.Add((mediaSource.Id, mediaSourceId));
+                sourceIds.Add(mediaSourceId);
+            }
+        }
+
+        if (sourceIds.Count == 0)
+        {
+            return result;
+        }
+
+        using var dbContext = _dbProvider.CreateDbContext();
+        var trickplayInfos = dbContext.TrickplayInfos
+            .AsNoTracking()
+            .WhereOneOrMany(sourceIds, i => i.ItemId)
+            .ToList();
+
+        if (trickplayInfos.Count == 0)
+        {
+            return result;
+        }
+
+        var resolutionsBySource = new Dictionary<Guid, Dictionary<int, TrickplayInfo>>();
+        foreach (var info in trickplayInfos)
+        {
+            if (!resolutionsBySource.TryGetValue(info.ItemId, out var resolutions))
+            {
+                resolutions = new Dictionary<int, TrickplayInfo>();
+                resolutionsBySource[info.ItemId] = resolutions;
+            }
+
+            resolutions[info.Width] = info;
+        }
+
+        foreach (var (itemId, sources) in sourcesByItem)
+        {
+            Dictionary<string, Dictionary<int, TrickplayInfo>>? manifest = null;
+            foreach (var (sourceKey, sourceId) in sources)
+            {
+                if (resolutionsBySource.TryGetValue(sourceId, out var resolutions) && resolutions.Count > 0)
+                {
+                    (manifest ??= new Dictionary<string, Dictionary<int, TrickplayInfo>>())[sourceKey] = resolutions;
+                }
+            }
+
+            if (manifest is not null)
+            {
+                result[itemId] = manifest;
+            }
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<string> GetTrickplayTilePathAsync(BaseItem item, int width, int index, bool saveWithMedia)
     {
         var trickplayResolutions = await GetTrickplayResolutions(item.Id).ConfigureAwait(false);

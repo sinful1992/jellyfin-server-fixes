@@ -265,6 +265,13 @@ namespace Emby.Server.Implementations.Dto
                 }
             }
 
+            // Batch-fetch trickplay manifests to avoid a query per media source per item.
+            IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null;
+            if (options.ContainsField(ItemFields.Trickplay))
+            {
+                trickplayBatch = _trickplayManager.GetTrickplayManifestBatch(accessibleItems);
+            }
+
             for (int index = 0; index < accessibleItems.Count; index++)
             {
                 var item = accessibleItems[index];
@@ -280,7 +287,8 @@ namespace Emby.Server.Implementations.Dto
                     artistsBatch,
                     resumeDataBatch?.GetValueOrDefault(item.Id),
                     peopleBatch,
-                    alternateVersionItemIds);
+                    alternateVersionItemIds,
+                    trickplayBatch);
 
                 if (item is LiveTvChannel tvChannel)
                 {
@@ -344,7 +352,8 @@ namespace Emby.Server.Implementations.Dto
             IReadOnlyDictionary<string, MusicArtist[]>? artistsBatch = null,
             VersionResumeData? resumeData = null,
             IReadOnlyDictionary<Guid, IReadOnlyList<PersonInfo>>? peopleBatch = null,
-            IReadOnlySet<Guid>? alternateVersionItemIds = null)
+            IReadOnlySet<Guid>? alternateVersionItemIds = null,
+            IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null)
         {
             var dto = new BaseItemDto
             {
@@ -413,7 +422,7 @@ namespace Emby.Server.Implementations.Dto
                 AttachStudios(dto, item);
             }
 
-            AttachBasicFields(dto, item, owner, options, artistsBatch, user, alternateVersionItemIds);
+            AttachBasicFields(dto, item, owner, options, artistsBatch, user, alternateVersionItemIds, trickplayBatch);
 
             if (options.ContainsField(ItemFields.CanDelete))
             {
@@ -1004,7 +1013,8 @@ namespace Emby.Server.Implementations.Dto
         /// <param name="artistsBatch">Optional pre-fetched artist lookup shared across a batch of items.</param>
         /// <param name="user">The user, for per-user values such as the accessible media source count.</param>
         /// <param name="alternateVersionItemIds">Optional pre-fetched set of item IDs that own alternate versions, shared across a batch of items.</param>
-        private void AttachBasicFields(BaseItemDto dto, BaseItem item, BaseItem? owner, DtoOptions options, IReadOnlyDictionary<string, MusicArtist[]>? artistsBatch = null, User? user = null, IReadOnlySet<Guid>? alternateVersionItemIds = null)
+        /// <param name="trickplayBatch">Optional pre-fetched trickplay manifests shared across a batch of items.</param>
+        private void AttachBasicFields(BaseItemDto dto, BaseItem item, BaseItem? owner, DtoOptions options, IReadOnlyDictionary<string, MusicArtist[]>? artistsBatch = null, User? user = null, IReadOnlySet<Guid>? alternateVersionItemIds = null, IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null)
         {
             if (options.ContainsField(ItemFields.DateCreated))
             {
@@ -1344,8 +1354,11 @@ namespace Emby.Server.Implementations.Dto
 
                 if (options.ContainsField(ItemFields.Trickplay))
                 {
-                    var trickplay = _trickplayManager.GetTrickplayManifest(item).GetAwaiter().GetResult();
-                    dto.Trickplay = trickplay.ToDictionary(
+                    // The batch is prefetched for list responses; single-item callers resolve here.
+                    var trickplay = trickplayBatch is null
+                        ? _trickplayManager.GetTrickplayManifestBatch([item]).GetValueOrDefault(item.Id)
+                        : trickplayBatch.GetValueOrDefault(item.Id);
+                    dto.Trickplay = (trickplay ?? []).ToDictionary(
                         mediaStream => mediaStream.Key,
                         mediaStream => mediaStream.Value.ToDictionary(
                             width => width.Key,

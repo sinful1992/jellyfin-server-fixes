@@ -74,6 +74,13 @@ public interface ITrickplayManager
     Task<Dictionary<string, Dictionary<int, TrickplayInfo>>> GetTrickplayManifest(BaseItem item);
 
     /// <summary>
+    /// Gets the trickplay manifests for several items using a single query.
+    /// </summary>
+    /// <param name="items">The items.</param>
+    /// <returns>A map of item id to that item's manifest. Items without trickplay data are absent.</returns>
+    IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>> GetTrickplayManifestBatch(IReadOnlyList<BaseItem> items);
+
+    /// <summary>
     /// Gets the path to a trickplay tile image.
     /// </summary>
     /// <param name="item">The item.</param>
