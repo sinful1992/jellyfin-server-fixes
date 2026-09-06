@@ -4,7 +4,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Threading.Tasks;
 using Jellyfin.Api.Attributes;
+using Jellyfin.Api.Auth.StreamAccessPolicy;
 using Jellyfin.Api.Helpers;
+using MediaBrowser.Common.Api;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.MediaEncoding;
@@ -50,8 +52,7 @@ public class HlsSegmentController : BaseJellyfinApiController
     /// <param name="segmentId">The segment id.</param>
     /// <response code="200">Hls audio segment returned.</response>
     /// <returns>A <see cref="FileStreamResult"/> containing the audio stream.</returns>
-    // Can't require authentication just yet due to seeing some requests come from Chrome without full query string
-    // [Authenticated]
+    [Authorize(Policy = StreamAccessRequirement.PolicyName)]
     [HttpGet("Audio/{itemId}/hls/{segmentId}/stream.mp3", Name = "GetHlsAudioSegmentLegacyMp3")]
     [HttpGet("Audio/{itemId}/hls/{segmentId}/stream.aac", Name = "GetHlsAudioSegmentLegacyAac")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -121,8 +122,7 @@ public class HlsSegmentController : BaseJellyfinApiController
     /// <response code="200">Hls video segment returned.</response>
     /// <response code="404">Hls segment not found.</response>
     /// <returns>A <see cref="FileStreamResult"/> containing the video segment.</returns>
-    // Can't require authentication just yet due to seeing some requests come from Chrome without full query string
-    // [Authenticated]
+    [Authorize(Policy = StreamAccessRequirement.PolicyName)]
     [HttpGet("Videos/{itemId}/hls/{playlistId}/{segmentId}.{segmentContainer}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

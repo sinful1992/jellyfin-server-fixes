@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Api.Attributes;
+using Jellyfin.Api.Auth.StreamAccessPolicy;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Api.Helpers;
 using Jellyfin.Api.ModelBinders;
@@ -311,6 +312,7 @@ public class VideosController : BaseJellyfinApiController
     /// <param name="enableAudioVbrEncoding">Optional. Whether to enable Audio Encoding.</param>
     /// <response code="200">Video stream returned.</response>
     /// <returns>A <see cref="FileResult"/> containing the audio file.</returns>
+    [Authorize(Policy = StreamAccessRequirement.PolicyName)]
     [HttpGet("{itemId}/stream")]
     [HttpHead("{itemId}/stream", Name = "HeadVideoStream")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -549,6 +551,7 @@ public class VideosController : BaseJellyfinApiController
     /// <param name="enableAudioVbrEncoding">Optional. Whether to enable Audio Encoding.</param>
     /// <response code="200">Video stream returned.</response>
     /// <returns>A <see cref="FileResult"/> containing the audio file.</returns>
+    [Authorize(Policy = StreamAccessRequirement.PolicyName)]
     [HttpGet("{itemId}/stream.{container}")]
     [HttpHead("{itemId}/stream.{container}", Name = "HeadVideoStreamByContainer")]
     [ProducesResponseType(StatusCodes.Status200OK)]
