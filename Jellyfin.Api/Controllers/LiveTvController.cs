@@ -1159,6 +1159,12 @@ public class LiveTvController : BaseJellyfinApiController
     /// An <see cref="OkResult"/> containing the recording stream on success,
     /// or a <see cref="NotFoundResult"/> if recording not found.
     /// </returns>
+    // Left on the LAN policy rather than moved to StreamAccess: these two are keyed by a
+    // server-generated recording/stream id rather than an item id, so there is no id for a
+    // PlaybackInfo ticket to cover, and the URLs are built by GetApiUrlForLocalAccess() and
+    // consumed by ffmpeg on the server itself. Unlike an item id they are not derived from a
+    // file path, so they are not guessable the way the media endpoints' ids are.
+    [Authorize(Policy = Policies.AnonymousLanAccessPolicy)]
     [HttpGet("LiveRecordings/{recordingId}/stream")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1186,6 +1192,7 @@ public class LiveTvController : BaseJellyfinApiController
     /// An <see cref="OkResult"/> containing the channel stream on success,
     /// or a <see cref="NotFoundResult"/> if stream not found.
     /// </returns>
+    [Authorize(Policy = Policies.AnonymousLanAccessPolicy)]
     [HttpGet("LiveStreamFiles/{streamId}/stream.{container}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

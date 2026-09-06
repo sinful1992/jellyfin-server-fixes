@@ -3,11 +3,14 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
 using Jellyfin.Api.Attributes;
+using Jellyfin.Api.Auth.StreamAccessPolicy;
 using Jellyfin.Api.Helpers;
 using Jellyfin.Api.Models.StreamingDtos;
+using MediaBrowser.Common.Api;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Streaming;
 using MediaBrowser.Model.Dlna;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -86,6 +89,7 @@ public class AudioController : BaseJellyfinApiController
     /// <param name="enableAudioVbrEncoding">Optional. Whether to enable Audio Encoding.</param>
     /// <response code="200">Audio stream returned.</response>
     /// <returns>A <see cref="FileResult"/> containing the audio file.</returns>
+    [Authorize(Policy = StreamAccessRequirement.PolicyName)]
     [HttpGet("{itemId}/stream", Name = "GetAudioStream")]
     [HttpHead("{itemId}/stream", Name = "HeadAudioStream")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -253,6 +257,7 @@ public class AudioController : BaseJellyfinApiController
     /// <param name="enableAudioVbrEncoding">Optional. Whether to enable Audio Encoding.</param>
     /// <response code="200">Audio stream returned.</response>
     /// <returns>A <see cref="FileResult"/> containing the audio file.</returns>
+    [Authorize(Policy = StreamAccessRequirement.PolicyName)]
     [HttpGet("{itemId}/stream.{container}", Name = "GetAudioStreamByContainer")]
     [HttpHead("{itemId}/stream.{container}", Name = "HeadAudioStreamByContainer")]
     [ProducesResponseType(StatusCodes.Status200OK)]
