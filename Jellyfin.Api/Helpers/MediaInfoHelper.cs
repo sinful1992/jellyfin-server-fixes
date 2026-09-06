@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net;
@@ -6,6 +7,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Api.Auth.StreamAccessPolicy;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Data;
 using Jellyfin.Data.Enums;
@@ -44,6 +46,8 @@ public class MediaInfoHelper
     private readonly ILogger<MediaInfoHelper> _logger;
     private readonly INetworkManager _networkManager;
     private readonly IDeviceManager _deviceManager;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IStreamTicketStore _ticketStore;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MediaInfoHelper"/> class.
@@ -56,6 +60,8 @@ public class MediaInfoHelper
     /// <param name="logger">Instance of the <see cref="ILogger{MediaInfoHelper}"/> interface.</param>
     /// <param name="networkManager">Instance of the <see cref="INetworkManager"/> interface.</param>
     /// <param name="deviceManager">Instance of the <see cref="IDeviceManager"/> interface.</param>
+    /// <param name="httpContextAccessor">Instance of the <see cref="IHttpContextAccessor"/> interface.</param>
+    /// <param name="ticketStore">Instance of the <see cref="IStreamTicketStore"/> interface.</param>
     public MediaInfoHelper(
         IUserManager userManager,
         ILibraryManager libraryManager,
@@ -64,7 +70,9 @@ public class MediaInfoHelper
         IServerConfigurationManager serverConfigurationManager,
         ILogger<MediaInfoHelper> logger,
         INetworkManager networkManager,
-        IDeviceManager deviceManager)
+        IDeviceManager deviceManager,
+        IHttpContextAccessor httpContextAccessor,
+        IStreamTicketStore ticketStore)
     {
         _userManager = userManager;
         _libraryManager = libraryManager;
@@ -74,6 +82,8 @@ public class MediaInfoHelper
         _logger = logger;
         _networkManager = networkManager;
         _deviceManager = deviceManager;
+        _httpContextAccessor = httpContextAccessor;
+        _ticketStore = ticketStore;
     }
 
     /// <summary>
@@ -142,7 +152,48 @@ public class MediaInfoHelper
             result.PlaySessionId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         }
 
+        IssueStreamTickets(item, result);
+
         return result;
+    }
+
+    /// <summary>
+    /// Grants the caller short-lived access to the media files this negotiation just handed out.
+    /// </summary>
+    /// <remarks>
+    /// The media endpoints cannot require a credential on the request itself: clients such as
+    /// Jellyfin for Android TV build the direct play URL from this response and send it with no
+    /// token, so requiring one drops them onto a server-side remux. Binding access to a
+    /// negotiation that WAS authenticated keeps those clients working while still refusing a
+    /// caller who never authenticated. Only reachable from MediaInfoController, which is
+    /// [Authorize]; the claims are re-checked here so that stays true if that ever changes.
+    /// </remarks>
+    /// <param name="item">The item playback was negotiated for.</param>
+    /// <param name="result">The negotiation result, naming every media source offered.</param>
+    private void IssueStreamTickets(BaseItem item, PlaybackInfoResponse result)
+    {
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext is null)
+        {
+            return;
+        }
+
+        var userId = httpContext.User.GetUserId();
+        if (userId.IsEmpty() && !httpContext.User.GetIsApiKey())
+        {
+            return;
+        }
+
+        var ids = new List<Guid>(result.MediaSources.Count + 1) { item.Id };
+        foreach (var mediaSource in result.MediaSources)
+        {
+            if (Guid.TryParse(mediaSource.Id, out var mediaSourceId))
+            {
+                ids.Add(mediaSourceId);
+            }
+        }
+
+        _ticketStore.Issue(httpContext.GetNormalizedRemoteIP(), userId, ids);
     }
 
     /// <summary>
