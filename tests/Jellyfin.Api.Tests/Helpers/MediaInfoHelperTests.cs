@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Api.Auth.StreamAccessPolicy;
 using Jellyfin.Api.Helpers;
 using Jellyfin.Database.Implementations.Entities;
 using MediaBrowser.Common.Net;
@@ -45,7 +46,9 @@ namespace Jellyfin.Api.Tests.Helpers
                 Mock.Of<ILogger<MediaInfoHelper>>(),
                 Mock.Of<INetworkManager>(),
                 Mock.Of<IDeviceManager>(),
-                appHost ?? Mock.Of<IServerApplicationHost>());
+                appHost ?? Mock.Of<IServerApplicationHost>(),
+                Mock.Of<IHttpContextAccessor>(),
+                Mock.Of<IStreamTicketStore>());
         }
 
         private static MediaSourceInfo CreateSource(Guid itemId, int bitrate, bool supportsDirectPlay = true)
