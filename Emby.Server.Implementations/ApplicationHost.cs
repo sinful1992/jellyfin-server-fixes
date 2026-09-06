@@ -38,6 +38,7 @@ using Emby.Server.Implementations.Session;
 using Emby.Server.Implementations.SyncPlay;
 using Emby.Server.Implementations.TV;
 using Emby.Server.Implementations.Updates;
+using Jellyfin.Api.Auth.StreamAccessPolicy;
 using Jellyfin.Api.Helpers;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Enums;
@@ -110,6 +111,7 @@ using MediaBrowser.XbmcMetadata.Providers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Prometheus.DotNetRuntime;
@@ -629,6 +631,21 @@ namespace Emby.Server.Implementations
 
             serviceCollection.AddSingleton<ITranscodeManager, TranscodeManager>();
             serviceCollection.AddScoped<MediaInfoHelper>();
+
+            // Streaming access. Registered here rather than in Jellyfin.Server's
+            // AddJellyfinApiAuthorization because AuthorizationOptions composes across every
+            // Configure delegate, and this keeps the change inside the assemblies the local
+            // build already replaces.
+            serviceCollection.AddSingleton<IStreamTicketStore, StreamTicketStore>();
+            serviceCollection.AddSingleton<IAuthorizationHandler, StreamAccessHandler>();
+            serviceCollection.Configure<AuthorizationOptions>(options =>
+            {
+                options.AddPolicy(
+                    StreamAccessRequirement.PolicyName,
+                    policy => policy
+                        .AddAuthenticationSchemes(Jellyfin.Api.Constants.AuthenticationSchemes.CustomAuthentication)
+                        .AddRequirements(new StreamAccessRequirement()));
+            });
             serviceCollection.AddScoped<AudioHelper>();
             serviceCollection.AddScoped<DynamicHlsHelper>();
             serviceCollection.AddScoped<IClientEventLogger, ClientEventLogger>();
