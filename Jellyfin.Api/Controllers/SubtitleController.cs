@@ -11,6 +11,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Api.Attributes;
+using Jellyfin.Api.Auth.StreamAccessPolicy;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Api.Helpers;
 using Jellyfin.Api.Models.SubtitleDtos;
@@ -205,6 +206,7 @@ public class SubtitleController : BaseJellyfinApiController
     /// <param name="startPositionTicks">The start position of the subtitle in ticks.</param>
     /// <response code="200">File returned.</response>
     /// <returns>A <see cref="FileContentResult"/> with the subtitle file.</returns>
+    [Authorize(Policy = StreamAccessRequirement.PolicyName)]
     [HttpGet("Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/Stream.{routeFormat}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesFile("text/*")]
@@ -292,6 +294,7 @@ public class SubtitleController : BaseJellyfinApiController
     /// <param name="addVttTimeMap">Optional. Whether to add a VTT time map.</param>
     /// <response code="200">File returned.</response>
     /// <returns>A <see cref="FileContentResult"/> with the subtitle file.</returns>
+    [Authorize(Policy = StreamAccessRequirement.PolicyName)]
     [HttpGet("Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/Stream.{routeFormat}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesFile("text/*")]
