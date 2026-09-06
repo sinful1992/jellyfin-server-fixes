@@ -238,14 +238,19 @@ namespace Emby.Server.Implementations.Library
         /// <inheritdoc />
         public UserItemData GetUserData(User user, BaseItem item)
         {
-            var cacheKey = GetCacheKey(user.InternalId, item.Id);
-            return _cache.GetOrAdd(
-                cacheKey,
-                (k, i) => i.UserData?.Where(e => e.UserId.Equals(user.Id)).Select(Map).FirstOrDefault() ?? new UserItemData()
-                {
-                    Key = i.GetUserDataKeys()[0],
-                },
-                item);
+            // Deliberately not seeded from item.UserData. That array is a snapshot taken when the
+            // BaseItem instance was materialised, and instances outlive their entry in the library
+            // cache -- SessionInfo.FullNowPlayingItem pins one for a whole playback session. Seeding
+            // the shared cache from a stale snapshot makes it authoritative for every later reader,
+            // so a favourite set through a newer instance is reverted by the next progress report,
+            // which writes every column back. The overload below is cache-first then database, which
+            // stays correct no matter which instance the caller happens to hold.
+            var keys = item.GetUserDataKeys();
+
+            return GetUserData(user, item.Id, keys) ?? new UserItemData()
+            {
+                Key = keys[0],
+            };
         }
 
         /// <inheritdoc />
