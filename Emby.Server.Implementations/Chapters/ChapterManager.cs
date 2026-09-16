@@ -138,6 +138,7 @@ public class ChapterManager : IChapterManager
 
         var success = true;
         var changesMade = false;
+        var extractedCount = 0;
 
         var runtimeTicks = video.RunTimeTicks ?? 0;
 
@@ -179,7 +180,7 @@ public class ChapterManager : IChapterManager
                             Protocol = video.PathProtocol ?? MediaProtocol.File,
                         };
 
-                        _logger.LogInformation("Extracting chapter image for {Name} at {Path}", video.Name, inputPath);
+                        _logger.LogDebug("Extracting chapter image for {Name} at {Time}", video.Name, time);
                         var tempFile = await _encoder.ExtractVideoImage(inputPath, container, mediaSource, video.GetDefaultVideoStream(), video.Video3DFormat, time, cancellationToken).ConfigureAwait(false);
                         File.Copy(tempFile, path, true);
 
@@ -195,6 +196,7 @@ public class ChapterManager : IChapterManager
                         chapter.ImagePath = path;
                         chapter.ImageDateModified = _fileSystem.GetLastWriteTimeUtc(path);
                         changesMade = true;
+                        extractedCount++;
                     }
                     catch (Exception ex)
                     {
@@ -221,6 +223,11 @@ public class ChapterManager : IChapterManager
                 chapter.ImagePath = null;
                 changesMade = true;
             }
+        }
+
+        if (extractedCount > 0)
+        {
+            _logger.LogInformation("Extracted {Count} chapter images for {Name} at {Path}", extractedCount, video.Name, video.Path);
         }
 
         if (saveChapters && changesMade)
