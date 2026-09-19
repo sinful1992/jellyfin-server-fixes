@@ -13,6 +13,7 @@ using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Extensions;
 using Jellyfin.Server.Implementations.Item;
 using Jellyfin.Server.Implementations.MediaSegments;
+using Jellyfin.Server.Implementations.Trickplay;
 using MediaBrowser.Common;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Chapters;
@@ -264,6 +265,18 @@ namespace Emby.Server.Implementations.Dto
                 }
             }
 
+            // Batch-fetch trickplay manifests: the per-item path opens a database context per media
+            // source, synchronously, inside this loop. One query for the page instead.
+            IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null;
+            if (options.ContainsField(ItemFields.Trickplay) && _trickplayManager is TrickplayManager trickplayManager)
+            {
+                var videos = accessibleItems.Where(i => i is Video).ToList();
+                if (videos.Count > 1)
+                {
+                    trickplayBatch = trickplayManager.GetTrickplayManifests(videos).GetAwaiter().GetResult();
+                }
+            }
+
             // Batch-detect which videos own alternate versions to avoid the per-item alternate-version
             // queries in MediaSourceCount. Videos absent from this set have a single media source.
             IReadOnlySet<Guid>? alternateVersionItemIds = null;
@@ -291,7 +304,8 @@ namespace Emby.Server.Implementations.Dto
                     artistsBatch,
                     resumeDataBatch?.GetValueOrDefault(item.Id),
                     peopleBatch,
-                    alternateVersionItemIds);
+                    alternateVersionItemIds,
+                    trickplayBatch);
 
                 if (item is LiveTvChannel tvChannel)
                 {
@@ -407,7 +421,8 @@ namespace Emby.Server.Implementations.Dto
             IReadOnlyDictionary<string, MusicArtist[]>? artistsBatch = null,
             VersionResumeData? resumeData = null,
             IReadOnlyDictionary<Guid, IReadOnlyList<PersonInfo>>? peopleBatch = null,
-            IReadOnlySet<Guid>? alternateVersionItemIds = null)
+            IReadOnlySet<Guid>? alternateVersionItemIds = null,
+            IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null)
         {
             var dto = new BaseItemDto
             {
@@ -476,7 +491,7 @@ namespace Emby.Server.Implementations.Dto
                 AttachStudios(dto, item);
             }
 
-            AttachBasicFields(dto, item, owner, options, artistsBatch, user, alternateVersionItemIds);
+            AttachBasicFields(dto, item, owner, options, artistsBatch, user, alternateVersionItemIds, trickplayBatch);
 
             if (options.ContainsField(ItemFields.CanDelete))
             {
@@ -1167,7 +1182,8 @@ namespace Emby.Server.Implementations.Dto
         /// <param name="artistsBatch">Optional pre-fetched artist lookup shared across a batch of items.</param>
         /// <param name="user">The user, for per-user values such as the accessible media source count.</param>
         /// <param name="alternateVersionItemIds">Optional pre-fetched set of item IDs that own alternate versions, shared across a batch of items.</param>
-        private void AttachBasicFields(BaseItemDto dto, BaseItem item, BaseItem? owner, DtoOptions options, IReadOnlyDictionary<string, MusicArtist[]>? artistsBatch = null, User? user = null, IReadOnlySet<Guid>? alternateVersionItemIds = null)
+        /// <param name="trickplayBatch">Trickplay manifests fetched for the whole page, or null on the single-item path.</param>
+        private void AttachBasicFields(BaseItemDto dto, BaseItem item, BaseItem? owner, DtoOptions options, IReadOnlyDictionary<string, MusicArtist[]>? artistsBatch = null, User? user = null, IReadOnlySet<Guid>? alternateVersionItemIds = null, IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null)
         {
             if (options.ContainsField(ItemFields.DateCreated))
             {
@@ -1507,7 +1523,11 @@ namespace Emby.Server.Implementations.Dto
 
                 if (options.ContainsField(ItemFields.Trickplay))
                 {
-                    var trickplay = _trickplayManager.GetTrickplayManifest(item).GetAwaiter().GetResult();
+                    // The page path fetched every item's manifest up front; a miss there means the
+                    // item was not part of the batch, not that it has no trickplay.
+                    var trickplay = trickplayBatch is not null && trickplayBatch.TryGetValue(item.Id, out var batched)
+                        ? batched
+                        : _trickplayManager.GetTrickplayManifest(item).GetAwaiter().GetResult();
                     dto.Trickplay = trickplay.ToDictionary(
                         mediaStream => mediaStream.Key,
                         mediaStream => mediaStream.Value.ToDictionary(

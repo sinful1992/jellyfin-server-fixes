@@ -747,6 +747,83 @@ public partial class TrickplayManager : ITrickplayManager
         return trickplayManifest;
     }
 
+    /// <summary>
+    /// Gets the trickplay manifests of many items with one database query.
+    /// </summary>
+    /// <remarks>
+    /// Same result per item as <see cref="GetTrickplayManifest"/>: keyed by media source id, sources
+    /// with no trickplay omitted, an empty manifest for an item with none. Not on
+    /// <see cref="ITrickplayManager"/>, which lives in MediaBrowser.Controller -- the assembly plugins
+    /// bind against, left untouched by this fork. Callers type-test for this class.
+    /// </remarks>
+    /// <param name="items">The items.</param>
+    /// <returns>Each item's manifest, keyed by item id.</returns>
+    public async Task<IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>> GetTrickplayManifests(IReadOnlyList<BaseItem> items)
+    {
+        // Media source ids per item, exactly as the single-item path enumerates them.
+        var sourcesByItem = new Dictionary<Guid, List<(string Id, Guid Guid)>>(items.Count);
+        var allSourceIds = new HashSet<Guid>();
+        foreach (var item in items)
+        {
+            var sources = new List<(string, Guid)>();
+            foreach (var mediaSource in item.GetMediaSources(false))
+            {
+                if (mediaSource.IsRemote || !Guid.TryParse(mediaSource.Id, out var mediaSourceId))
+                {
+                    continue;
+                }
+
+                sources.Add((mediaSource.Id, mediaSourceId));
+                allSourceIds.Add(mediaSourceId);
+            }
+
+            sourcesByItem[item.Id] = sources;
+        }
+
+        var resolutionsBySource = new Dictionary<Guid, Dictionary<int, TrickplayInfo>>();
+        if (allSourceIds.Count > 0)
+        {
+            var ids = allSourceIds.ToList();
+            var dbContext = await _dbProvider.CreateDbContextAsync().ConfigureAwait(false);
+            await using (dbContext.ConfigureAwait(false))
+            {
+                var infos = await dbContext.TrickplayInfos
+                    .AsNoTracking()
+                    .WhereOneOrMany(ids, i => i.ItemId)
+                    .ToListAsync()
+                    .ConfigureAwait(false);
+
+                foreach (var info in infos)
+                {
+                    if (!resolutionsBySource.TryGetValue(info.ItemId, out var byWidth))
+                    {
+                        byWidth = new Dictionary<int, TrickplayInfo>();
+                        resolutionsBySource[info.ItemId] = byWidth;
+                    }
+
+                    byWidth[info.Width] = info;
+                }
+            }
+        }
+
+        var manifests = new Dictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>(items.Count);
+        foreach (var (itemId, sources) in sourcesByItem)
+        {
+            var manifest = new Dictionary<string, Dictionary<int, TrickplayInfo>>();
+            foreach (var (id, guid) in sources)
+            {
+                if (resolutionsBySource.TryGetValue(guid, out var resolutions) && resolutions.Count > 0)
+                {
+                    manifest[id] = resolutions;
+                }
+            }
+
+            manifests[itemId] = manifest;
+        }
+
+        return manifests;
+    }
+
     /// <inheritdoc />
     public async Task<string> GetTrickplayTilePathAsync(BaseItem item, int width, int index, bool saveWithMedia)
     {
