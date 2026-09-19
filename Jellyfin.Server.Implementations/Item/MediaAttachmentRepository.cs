@@ -52,6 +52,39 @@ public class MediaAttachmentRepository(IDbContextFactory<JellyfinDbContext> dbPr
         return query.AsEnumerable().Select(Map).ToArray();
     }
 
+    /// <summary>
+    /// Gets the media attachments of many items in one query.
+    /// </summary>
+    /// <remarks>
+    /// A batch loader for <see cref="PagePrefetch"/>. Not on the repository interface, which lives in
+    /// MediaBrowser.Controller -- the assembly plugins bind against, shipped untouched by this fork.
+    /// Callers reach it by type-testing the instance they were given.
+    /// </remarks>
+    /// <param name="itemIds">The item ids.</param>
+    /// <returns>The attachments of each item that has any.</returns>
+    public IReadOnlyDictionary<Guid, IReadOnlyList<MediaAttachment>> GetMediaAttachmentsByItems(IReadOnlyList<Guid> itemIds)
+    {
+        if (itemIds.Count == 0)
+        {
+            return new Dictionary<Guid, IReadOnlyList<MediaAttachment>>();
+        }
+
+        using var context = dbProvider.CreateDbContext();
+        var result = new Dictionary<Guid, IReadOnlyList<MediaAttachment>>();
+        foreach (var group in context.AttachmentStreamInfos
+                     .AsNoTracking()
+                     .WhereOneOrMany(itemIds, e => e.ItemId)
+                     .OrderBy(e => e.ItemId)
+                     .ThenBy(e => e.Index)
+                     .AsEnumerable()
+                     .GroupBy(e => e.ItemId))
+        {
+            result[group.Key] = group.Select(Map).ToArray();
+        }
+
+        return result;
+    }
+
     private MediaAttachment Map(AttachmentStreamInfo attachment)
     {
         return new MediaAttachment()

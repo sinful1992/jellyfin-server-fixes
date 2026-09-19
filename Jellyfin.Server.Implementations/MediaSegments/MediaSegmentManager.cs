@@ -9,6 +9,7 @@ using Jellyfin.Database.Implementations;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Extensions;
+using Jellyfin.Server.Implementations.Item;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
@@ -283,8 +284,38 @@ public class MediaSegmentManager : IMediaSegmentManager
     /// <inheritdoc />
     public bool HasSegments(Guid itemId)
     {
+        if (PagePrefetch.Current is { } prefetch && prefetch.TryGetHasSegments(itemId, out var hasSegments))
+        {
+            return hasSegments;
+        }
+
         using var db = _dbProvider.CreateDbContext();
         return db.MediaSegments.Any(e => e.ItemId.Equals(itemId));
+    }
+
+    /// <summary>
+    /// Gets which of many items have media segments, in one query.
+    /// </summary>
+    /// <remarks>
+    /// A batch loader for <see cref="PagePrefetch"/>. Not on <see cref="IMediaSegmentManager"/>, which lives in
+    /// MediaBrowser.Controller -- the assembly plugins bind against, shipped untouched by this fork.
+    /// Callers reach it by type-testing the instance they were given.
+    /// </remarks>
+    /// <param name="itemIds">The item ids.</param>
+    /// <returns>The ids that have at least one segment.</returns>
+    public IReadOnlySet<Guid> GetItemIdsWithSegments(IReadOnlyList<Guid> itemIds)
+    {
+        if (itemIds.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        using var db = _dbProvider.CreateDbContext();
+        return db.MediaSegments
+            .WhereOneOrMany(itemIds, e => e.ItemId)
+            .Select(e => e.ItemId)
+            .Distinct()
+            .ToHashSet();
     }
 
     /// <inheritdoc/>

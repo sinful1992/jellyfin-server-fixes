@@ -55,6 +55,39 @@ public class MediaStreamRepository : IMediaStreamRepository
         return TranslateQuery(context.MediaStreamInfos.AsNoTracking(), filter).AsEnumerable().Select(Map).ToArray();
     }
 
+    /// <summary>
+    /// Gets the media streams of many items in one query.
+    /// </summary>
+    /// <remarks>
+    /// A batch loader for <see cref="PagePrefetch"/>. Not on the repository interface, which lives in
+    /// MediaBrowser.Controller -- the assembly plugins bind against, shipped untouched by this fork.
+    /// Callers reach it by type-testing the instance they were given.
+    /// </remarks>
+    /// <param name="itemIds">The item ids.</param>
+    /// <returns>The streams of each item that has any, in stream-index order.</returns>
+    public IReadOnlyDictionary<Guid, IReadOnlyList<MediaStream>> GetMediaStreamsByItems(IReadOnlyList<Guid> itemIds)
+    {
+        if (itemIds.Count == 0)
+        {
+            return ImmutableDictionary<Guid, IReadOnlyList<MediaStream>>.Empty;
+        }
+
+        using var context = _dbProvider.CreateDbContext();
+        var result = new Dictionary<Guid, IReadOnlyList<MediaStream>>(itemIds.Count);
+        foreach (var group in context.MediaStreamInfos
+                     .AsNoTracking()
+                     .WhereOneOrMany(itemIds, e => e.ItemId)
+                     .OrderBy(e => e.ItemId)
+                     .ThenBy(e => e.StreamIndex)
+                     .AsEnumerable()
+                     .GroupBy(e => e.ItemId))
+        {
+            result[group.Key] = group.Select(Map).ToArray();
+        }
+
+        return result;
+    }
+
     /// <inheritdoc />
     public IReadOnlyList<string> GetMediaStreamLanguages(MediaStreamType mediaStreamType)
     {

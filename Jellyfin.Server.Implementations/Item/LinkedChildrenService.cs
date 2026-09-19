@@ -60,6 +60,42 @@ public class LinkedChildrenService : ILinkedChildrenService
             .ToArray();
     }
 
+    /// <summary>
+    /// Gets the linked children of one type for many parents in one query.
+    /// </summary>
+    /// <remarks>
+    /// A batch loader for <see cref="PagePrefetch"/>. Not on the repository interface, which lives in
+    /// MediaBrowser.Controller -- the assembly plugins bind against, shipped untouched by this fork.
+    /// Callers reach it by type-testing the instance they were given.
+    /// </remarks>
+    /// <param name="parentIds">The parent ids.</param>
+    /// <param name="childType">The child type, as <see cref="GetLinkedChildrenIds"/> takes it.</param>
+    /// <returns>The child ids of each parent that has any, in sort order.</returns>
+    public IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> GetLinkedChildrenIdsByParents(IReadOnlyList<Guid> parentIds, int childType)
+    {
+        if (parentIds.Count == 0)
+        {
+            return new Dictionary<Guid, IReadOnlyList<Guid>>();
+        }
+
+        using var dbContext = _dbProvider.CreateDbContext();
+        var result = new Dictionary<Guid, IReadOnlyList<Guid>>();
+        foreach (var group in dbContext.LinkedChildren
+                     .Where(lc => (int)lc.ChildType == childType)
+                     .WhereOneOrMany(parentIds, lc => lc.ParentId)
+                     .OrderBy(lc => lc.ParentId)
+                     .ThenBy(lc => lc.SortOrder)
+                     .ThenBy(lc => lc.ChildId)
+                     .Select(lc => new { lc.ParentId, lc.ChildId })
+                     .AsEnumerable()
+                     .GroupBy(lc => lc.ParentId))
+        {
+            result[group.Key] = group.Select(lc => lc.ChildId).ToArray();
+        }
+
+        return result;
+    }
+
     /// <inheritdoc/>
     public IReadOnlySet<Guid> GetItemIdsWithAlternateVersions(IReadOnlyList<Guid> itemIds)
     {

@@ -24,6 +24,7 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Extensions;
+using Jellyfin.Server.Implementations.Item;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Configuration;
@@ -2299,6 +2300,11 @@ namespace Emby.Server.Implementations.Library
         {
             ArgumentNullException.ThrowIfNull(video);
 
+            if (PagePrefetch.Current is { } prefetch && prefetch.TryGetLocalAlternateVersionIds(video.Id, out var fromBatch))
+            {
+                return fromBatch;
+            }
+
             var linkedIds = _linkedChildrenService.GetLinkedChildrenIds(video.Id, (int)MediaBrowser.Controller.Entities.LinkedChildType.LocalAlternateVersion);
             if (linkedIds.Count > 0)
             {
@@ -2313,7 +2319,9 @@ namespace Emby.Server.Implementations.Library
         {
             ArgumentNullException.ThrowIfNull(video);
 
-            var linkedIds = _linkedChildrenService.GetLinkedChildrenIds(video.Id, (int)MediaBrowser.Controller.Entities.LinkedChildType.LinkedAlternateVersion);
+            var linkedIds = PagePrefetch.Current is { } prefetch && prefetch.TryGetLinkedAlternateVersionIds(video.Id, out var fromBatch)
+                ? fromBatch
+                : _linkedChildrenService.GetLinkedChildrenIds(video.Id, (int)MediaBrowser.Controller.Entities.LinkedChildType.LinkedAlternateVersion);
             if (linkedIds.Count > 0)
             {
                 return linkedIds
@@ -2324,6 +2332,23 @@ namespace Emby.Server.Implementations.Library
             }
 
             return [];
+        }
+
+        /// <summary>
+        /// Batch-reads the alternate version links of many videos for a <see cref="PagePrefetch"/>.
+        /// </summary>
+        /// <param name="videoIds">The video ids.</param>
+        /// <returns>Local and linked alternate version ids by video, or nulls when the service cannot batch.</returns>
+        public (IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>? Local, IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>? Linked) LoadAlternateVersionIdsForPrefetch(IReadOnlyList<Guid> videoIds)
+        {
+            if (_linkedChildrenService is not LinkedChildrenService service)
+            {
+                return (null, null);
+            }
+
+            return (
+                service.GetLinkedChildrenIdsByParents(videoIds, (int)MediaBrowser.Controller.Entities.LinkedChildType.LocalAlternateVersion),
+                service.GetLinkedChildrenIdsByParents(videoIds, (int)MediaBrowser.Controller.Entities.LinkedChildType.LinkedAlternateVersion));
         }
 
         /// <inheritdoc />

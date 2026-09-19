@@ -19,6 +19,7 @@ using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Extensions;
 using Jellyfin.Extensions.Json;
+using Jellyfin.Server.Implementations.Item;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller;
@@ -101,6 +102,15 @@ namespace Emby.Server.Implementations.Library
 
         public IReadOnlyList<MediaStream> GetMediaStreams(MediaStreamQuery query)
         {
+            // A whole-item read inside a page prefetch is answered from the batch.
+            if (query.Index is null
+                && query.Type is null
+                && PagePrefetch.Current is { } prefetch
+                && prefetch.TryGetMediaStreams(query.ItemId, out var fromBatch))
+            {
+                return fromBatch;
+            }
+
             var list = _mediaStreamRepository.GetMediaStreams(query);
 
             foreach (var stream in list)
@@ -162,7 +172,51 @@ namespace Emby.Server.Implementations.Library
         /// <inheritdoc />
         public IReadOnlyList<MediaAttachment> GetMediaAttachments(MediaAttachmentQuery query)
         {
+            if (query.Index is null
+                && PagePrefetch.Current is { } prefetch
+                && prefetch.TryGetMediaAttachments(query.ItemId, out var fromBatch))
+            {
+                return fromBatch;
+            }
+
             return _mediaAttachmentRepository.GetMediaAttachments(query);
+        }
+
+        /// <summary>
+        /// Batch-reads the media streams of many items for a <see cref="PagePrefetch"/>, with the
+        /// same per-stream post-processing <see cref="GetMediaStreams(MediaStreamQuery)"/> applies.
+        /// </summary>
+        /// <param name="itemIds">The item ids.</param>
+        /// <returns>Streams by item, or null when the repository cannot batch.</returns>
+        public IReadOnlyDictionary<Guid, IReadOnlyList<MediaStream>> LoadMediaStreamsForPrefetch(IReadOnlyList<Guid> itemIds)
+        {
+            if (_mediaStreamRepository is not MediaStreamRepository repository)
+            {
+                return null;
+            }
+
+            var batch = repository.GetMediaStreamsByItems(itemIds);
+            foreach (var streams in batch.Values)
+            {
+                foreach (var stream in streams)
+                {
+                    stream.SupportsExternalStream = StreamSupportsExternalStream(stream);
+                }
+            }
+
+            return batch;
+        }
+
+        /// <summary>
+        /// Batch-reads the media attachments of many items for a <see cref="PagePrefetch"/>.
+        /// </summary>
+        /// <param name="itemIds">The item ids.</param>
+        /// <returns>Attachments by item, or null when the repository cannot batch.</returns>
+        public IReadOnlyDictionary<Guid, IReadOnlyList<MediaAttachment>> LoadMediaAttachmentsForPrefetch(IReadOnlyList<Guid> itemIds)
+        {
+            return _mediaAttachmentRepository is MediaAttachmentRepository repository
+                ? repository.GetMediaAttachmentsByItems(itemIds)
+                : null;
         }
 
         /// <inheritdoc />

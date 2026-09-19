@@ -7,9 +7,12 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using Jellyfin.Data;
+using Emby.Server.Implementations.Library;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Extensions;
+using Jellyfin.Server.Implementations.Item;
+using Jellyfin.Server.Implementations.MediaSegments;
 using MediaBrowser.Common;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Chapters;
@@ -164,6 +167,10 @@ namespace Emby.Server.Implementations.Dto
             bool skipVisibilityCheck = false)
         {
             var accessibleItems = skipVisibilityCheck || user is null ? items : items.Where(x => x.IsVisible(user)).ToList();
+            // One query each for the reads item.GetMediaSources() repeats per item below
+            // (streams, attachments, alternate-version links, segment flag). Disposed with the
+            // method, i.e. with the request.
+            using var pagePrefetch = BeginPagePrefetch(accessibleItems, options);
             var returnItems = new BaseItemDto[accessibleItems.Count];
             List<(BaseItem, BaseItemDto)>? programTuples = null;
             List<(BaseItemDto, LiveTvChannel)>? channelTuples = null;
@@ -314,6 +321,58 @@ namespace Emby.Server.Implementations.Dto
             }
 
             return returnItems;
+        }
+
+        /// <summary>
+        /// Opens a <see cref="PagePrefetch"/> for the items whose DTOs will call GetMediaSources.
+        /// </summary>
+        /// <returns>The scope to dispose when the page is built, or null when nothing was prefetched.</returns>
+        private PagePrefetch? BeginPagePrefetch(IReadOnlyList<BaseItem> items, DtoOptions options)
+        {
+            var wantsSources = options.ContainsField(ItemFields.MediaSources)
+                || options.ContainsField(ItemFields.MediaStreams)
+                || options.ContainsField(ItemFields.Trickplay);
+
+            var itemIds = new List<Guid>(items.Count);
+            var videoIds = new List<Guid>(items.Count);
+            foreach (var item in items)
+            {
+                // Audio always reads its streams (HasLyrics); video only when a field asks for its
+                // sources. Channel-sourced items get their sources from the channel, not the database.
+                if (item is not IHasMediaSources || item.SourceType != SourceType.Library || !(wantsSources || item is Audio))
+                {
+                    continue;
+                }
+
+                itemIds.Add(item.Id);
+                if (item is Video)
+                {
+                    videoIds.Add(item.Id);
+                }
+            }
+
+            // A single item costs one query either way.
+            if (itemIds.Count < 2)
+            {
+                return null;
+            }
+
+            var mediaSourceManager = _mediaSourceManager as MediaSourceManager;
+            var streams = mediaSourceManager?.LoadMediaStreamsForPrefetch(itemIds);
+            var attachments = wantsSources ? mediaSourceManager?.LoadMediaAttachmentsForPrefetch(itemIds) : null;
+            var (local, linked) = wantsSources && videoIds.Count > 0 && _libraryManager is LibraryManager libraryManager
+                ? libraryManager.LoadAlternateVersionIdsForPrefetch(videoIds)
+                : (null, null);
+            var withSegments = wantsSources && BaseItem.MediaSegmentManager is MediaSegmentManager segmentManager
+                ? segmentManager.GetItemIdsWithSegments(itemIds)
+                : null;
+
+            if (streams is null && attachments is null && local is null && withSegments is null)
+            {
+                return null;
+            }
+
+            return PagePrefetch.Begin(itemIds.ToHashSet(), streams, attachments, local, linked, withSegments);
         }
 
         public BaseItemDto GetBaseItemDto(BaseItem item, DtoOptions options, User? user = null, BaseItem? owner = null)
