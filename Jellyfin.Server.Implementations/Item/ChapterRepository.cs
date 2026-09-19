@@ -66,6 +66,43 @@ public class ChapterRepository : IChapterRepository
             .ToArray();
     }
 
+    /// <summary>
+    /// Gets the chapters of many items in one query.
+    /// </summary>
+    /// <remarks>
+    /// Not on <see cref="IChapterRepository"/>, which lives in MediaBrowser.Controller -- the assembly
+    /// plugins bind against, shipped untouched by this fork. Callers type-test for this class.
+    /// </remarks>
+    /// <param name="itemIds">The item ids.</param>
+    /// <returns>The chapters of each item that has any, in start-position order.</returns>
+    public IReadOnlyDictionary<Guid, IReadOnlyList<ChapterInfo>> GetChaptersByItems(IReadOnlyList<Guid> itemIds)
+    {
+        if (itemIds.Count == 0)
+        {
+            return new Dictionary<Guid, IReadOnlyList<ChapterInfo>>();
+        }
+
+        using var context = _dbProvider.CreateDbContext();
+        var result = new Dictionary<Guid, IReadOnlyList<ChapterInfo>>();
+        foreach (var group in context.Chapters.AsNoTracking()
+                     .WhereOneOrMany(itemIds, e => e.ItemId)
+                     .OrderBy(e => e.ItemId)
+                     .ThenBy(e => e.StartPositionTicks)
+                     .ThenBy(e => e.ChapterIndex)
+                     .Select(e => new
+                     {
+                         chapter = e,
+                         baseItemPath = e.Item.Path
+                     })
+                     .AsEnumerable()
+                     .GroupBy(e => e.chapter.ItemId))
+        {
+            result[group.Key] = group.Select(e => Map(e.chapter, e.baseItemPath!)).ToArray();
+        }
+
+        return result;
+    }
+
     /// <inheritdoc />
     public void SaveChapters(Guid itemId, IReadOnlyList<ChapterInfo> chapters)
     {

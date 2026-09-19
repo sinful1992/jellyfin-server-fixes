@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using Jellyfin.Data;
+using Emby.Server.Implementations.Chapters;
 using Emby.Server.Implementations.Library;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
@@ -277,6 +278,13 @@ namespace Emby.Server.Implementations.Dto
                 }
             }
 
+            // Batch-fetch chapters: one query for the page instead of one per item.
+            IReadOnlyDictionary<Guid, IReadOnlyList<ChapterInfo>>? chaptersBatch = null;
+            if (options.ContainsField(ItemFields.Chapters) && accessibleItems.Count > 1 && _chapterManager is ChapterManager chapterManager)
+            {
+                chaptersBatch = chapterManager.GetChaptersByItems(accessibleItems.Select(i => i.Id).ToList());
+            }
+
             // Batch-detect which videos own alternate versions to avoid the per-item alternate-version
             // queries in MediaSourceCount. Videos absent from this set have a single media source.
             IReadOnlySet<Guid>? alternateVersionItemIds = null;
@@ -305,7 +313,8 @@ namespace Emby.Server.Implementations.Dto
                     resumeDataBatch?.GetValueOrDefault(item.Id),
                     peopleBatch,
                     alternateVersionItemIds,
-                    trickplayBatch);
+                    trickplayBatch,
+                    chaptersBatch);
 
                 if (item is LiveTvChannel tvChannel)
                 {
@@ -422,7 +431,8 @@ namespace Emby.Server.Implementations.Dto
             VersionResumeData? resumeData = null,
             IReadOnlyDictionary<Guid, IReadOnlyList<PersonInfo>>? peopleBatch = null,
             IReadOnlySet<Guid>? alternateVersionItemIds = null,
-            IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null)
+            IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null,
+            IReadOnlyDictionary<Guid, IReadOnlyList<ChapterInfo>>? chaptersBatch = null)
         {
             var dto = new BaseItemDto
             {
@@ -491,7 +501,7 @@ namespace Emby.Server.Implementations.Dto
                 AttachStudios(dto, item);
             }
 
-            AttachBasicFields(dto, item, owner, options, artistsBatch, user, alternateVersionItemIds, trickplayBatch);
+            AttachBasicFields(dto, item, owner, options, artistsBatch, user, alternateVersionItemIds, trickplayBatch, chaptersBatch);
 
             if (options.ContainsField(ItemFields.CanDelete))
             {
@@ -1183,7 +1193,8 @@ namespace Emby.Server.Implementations.Dto
         /// <param name="user">The user, for per-user values such as the accessible media source count.</param>
         /// <param name="alternateVersionItemIds">Optional pre-fetched set of item IDs that own alternate versions, shared across a batch of items.</param>
         /// <param name="trickplayBatch">Trickplay manifests fetched for the whole page, or null on the single-item path.</param>
-        private void AttachBasicFields(BaseItemDto dto, BaseItem item, BaseItem? owner, DtoOptions options, IReadOnlyDictionary<string, MusicArtist[]>? artistsBatch = null, User? user = null, IReadOnlySet<Guid>? alternateVersionItemIds = null, IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null)
+        /// <param name="chaptersBatch">Chapters fetched for the whole page, or null on the single-item path.</param>
+        private void AttachBasicFields(BaseItemDto dto, BaseItem item, BaseItem? owner, DtoOptions options, IReadOnlyDictionary<string, MusicArtist[]>? artistsBatch = null, User? user = null, IReadOnlySet<Guid>? alternateVersionItemIds = null, IReadOnlyDictionary<Guid, Dictionary<string, Dictionary<int, TrickplayInfo>>>? trickplayBatch = null, IReadOnlyDictionary<Guid, IReadOnlyList<ChapterInfo>>? chaptersBatch = null)
         {
             if (options.ContainsField(ItemFields.DateCreated))
             {
@@ -1540,7 +1551,10 @@ namespace Emby.Server.Implementations.Dto
 
             if (options.ContainsField(ItemFields.Chapters))
             {
-                dto.Chapters = _chapterManager.GetChapters(item.Id).ToList();
+                // The page path fetched every item's chapters up front; a miss there means "none".
+                dto.Chapters = chaptersBatch is not null
+                    ? (chaptersBatch.GetValueOrDefault(item.Id) ?? []).ToList()
+                    : _chapterManager.GetChapters(item.Id).ToList();
             }
 
             if (options.ContainsField(ItemFields.MediaStreams))

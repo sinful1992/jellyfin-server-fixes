@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Extensions;
+using Jellyfin.Server.Implementations.Item;
 using MediaBrowser.Controller.Chapters;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
@@ -260,6 +261,22 @@ public class ChapterManager : IChapterManager
     public IReadOnlyList<ChapterInfo> GetChapters(Guid baseItemId)
     {
         return _chapterRepository.GetChapters(baseItemId);
+    }
+
+    /// <summary>
+    /// Gets the chapters of many items in one query.
+    /// </summary>
+    /// <remarks>
+    /// Not on <see cref="IChapterManager"/> (MediaBrowser.Controller, untouched by this fork);
+    /// DtoService type-tests for this class.
+    /// </remarks>
+    /// <param name="itemIds">The item ids.</param>
+    /// <returns>Chapters by item, or null when the repository cannot batch.</returns>
+    public IReadOnlyDictionary<Guid, IReadOnlyList<ChapterInfo>>? GetChaptersByItems(IReadOnlyList<Guid> itemIds)
+    {
+        return _chapterRepository is ChapterRepository repository
+            ? repository.GetChaptersByItems(itemIds)
+            : null;
     }
 
     /// <inheritdoc />
