@@ -636,7 +636,9 @@ namespace Emby.Server.Implementations
             // AddJellyfinApiAuthorization because AuthorizationOptions composes across every
             // Configure delegate, and this keeps the change inside the assemblies the local
             // build already replaces.
-            serviceCollection.AddSingleton<IStreamTicketStore, StreamTicketStore>();
+            serviceCollection.AddSingleton<IStreamTicketStore>(sp => new StreamTicketStore(
+                sp.GetRequiredService<IApplicationPaths>(),
+                sp.GetRequiredService<ILogger<StreamTicketStore>>()));
             serviceCollection.AddSingleton<IAuthorizationHandler, StreamAccessHandler>();
             serviceCollection.Configure<AuthorizationOptions>(options =>
             {
