@@ -538,7 +538,14 @@ public class DynamicHlsHelper
 
         if (EncodingHelper.IsDovi(state.VideoStream) && !_encodingHelper.IsDoviRemoved(state))
         {
-            AppendDvString();
+            // Only label Dovi for clients that explicitly declared DOVI support, same rule as the P5 variant above.
+            // ExoPlayer parses the tag as video/dolby-vision, may only reach it through a decoder fallback, and then
+            // picks the same-BANDWIDTH H.264 SDR entrance instead: a full re-encode of a stream it could have copied.
+            if (state.GetRequestedRangeTypes(state.VideoStream.Codec)
+                .Any(rangeType => rangeType.StartsWith("DOVI", StringComparison.OrdinalIgnoreCase)))
+            {
+                AppendDvString();
+            }
         }
         else if (EncodingHelper.IsHdr10Plus(state.VideoStream) && !_encodingHelper.IsHdr10PlusRemoved(state))
         {
