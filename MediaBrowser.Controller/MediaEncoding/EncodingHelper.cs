@@ -7601,6 +7601,22 @@ namespace MediaBrowser.Controller.MediaEncoding
                 audioCodecs.RemoveAt(0);
                 audioCodecs.Add(removed);
             }
+
+            if (inputChannels >= 6)
+            {
+                // A client that lists eac3/ac3 can bitstream them to an AV receiver, while multichannel aac has to be
+                // decoded to PCM on the client, which many TV apps can only output as stereo. Keep surround: prefer them.
+                foreach (var codec in new[] { "ac3", "eac3" })
+                {
+                    var index = audioCodecs.FindIndex(i => string.Equals(i, codec, StringComparison.OrdinalIgnoreCase));
+                    if (index > 0)
+                    {
+                        var preferred = audioCodecs[index];
+                        audioCodecs.RemoveAt(index);
+                        audioCodecs.Insert(0, preferred);
+                    }
+                }
+            }
         }
 
         private void ShiftVideoCodecsIfNeeded(List<string> videoCodecs, EncodingOptions encodingOptions)
