@@ -136,6 +136,15 @@ public static class StreamingHelpers
                 {
                     mediaSource = mediaSources[0];
                 }
+
+                // Binge-ahead: a client whose PlaybackInfo was answered with a prepared copy streams that file.
+                // These clients send neither a token nor a session id with the stream URL, so the client address is the key.
+                if (mediaSource is not null
+                    && httpContext.RequestServices.GetService(typeof(IPreparedMediaStore)) is IPreparedMediaStore preparedMediaStore
+                    && preparedMediaStore.GetServing(httpContext.GetNormalizedRemoteIP().ToString(), mediaSource) is { } prepared)
+                {
+                    mediaSource = prepared;
+                }
             }
         }
         else

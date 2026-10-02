@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Linq;
 using System.Net.Mime;
 using System.Threading.Tasks;
@@ -12,7 +13,10 @@ using Jellyfin.Extensions;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Devices;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.MediaEncoding;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.MediaInfo;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -35,6 +39,7 @@ public class MediaInfoController : BaseJellyfinApiController
     private readonly ILogger<MediaInfoController> _logger;
     private readonly MediaInfoHelper _mediaInfoHelper;
     private readonly IUserManager _userManager;
+    private readonly IPreparedMediaStore _preparedMediaStore;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MediaInfoController"/> class.
@@ -45,13 +50,15 @@ public class MediaInfoController : BaseJellyfinApiController
     /// <param name="logger">Instance of the <see cref="ILogger{MediaInfoController}"/> interface.</param>
     /// <param name="mediaInfoHelper">Instance of the <see cref="MediaInfoHelper"/>.</param>
     /// <param name="userManager">Instance of the <see cref="IUserManager"/> interface..</param>
+    /// <param name="preparedMediaStore">Instance of the <see cref="IPreparedMediaStore"/> interface.</param>
     public MediaInfoController(
         IMediaSourceManager mediaSourceManager,
         IDeviceManager deviceManager,
         ILibraryManager libraryManager,
         ILogger<MediaInfoController> logger,
         MediaInfoHelper mediaInfoHelper,
-        IUserManager userManager)
+        IUserManager userManager,
+        IPreparedMediaStore preparedMediaStore)
     {
         _mediaSourceManager = mediaSourceManager;
         _deviceManager = deviceManager;
@@ -59,6 +66,7 @@ public class MediaInfoController : BaseJellyfinApiController
         _logger = logger;
         _mediaInfoHelper = mediaInfoHelper;
         _userManager = userManager;
+        _preparedMediaStore = preparedMediaStore;
     }
 
     /// <summary>
@@ -190,7 +198,7 @@ public class MediaInfoController : BaseJellyfinApiController
         if (profile is not null)
         {
             // set device specific data
-            foreach (var mediaSource in info.MediaSources)
+            void SetDeviceData(MediaSourceInfo mediaSource)
             {
                 _mediaInfoHelper.SetDeviceSpecificData(
                     item,
@@ -213,6 +221,13 @@ public class MediaInfoController : BaseJellyfinApiController
                     playbackInfoDto?.AlwaysBurnInSubtitleWhenTranscoding ?? false,
                     Request.HttpContext.GetNormalizedRemoteIP());
             }
+
+            foreach (var mediaSource in info.MediaSources)
+            {
+                SetDeviceData(mediaSource);
+            }
+
+            ApplyPreparedMedia(item, info, liveStreamId, SetDeviceData);
 
             _mediaInfoHelper.SortMediaSources(info, maxStreamingBitrate, item.Id);
         }
@@ -341,5 +356,48 @@ public class MediaInfoController : BaseJellyfinApiController
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
+    }
+
+    /// <summary>
+    /// Binge-ahead: when this client would transcode the original for video reasons only and a prepared H.264
+    /// copy exists, answer with the prepared file under the original source id, and remember the client so its
+    /// stream request is served from that file. Any other outcome clears the entry for this client and item.
+    /// </summary>
+    private void ApplyPreparedMedia(BaseItem item, PlaybackInfoResponse info, string? liveStreamId, Action<MediaSourceInfo> setDeviceData)
+    {
+        var clientIp = Request.HttpContext.GetNormalizedRemoteIP().ToString();
+        var itemSourceId = item.Id.ToString("N", CultureInfo.InvariantCulture);
+        var original = info.MediaSources.Count == 1 && string.IsNullOrEmpty(liveStreamId)
+            ? info.MediaSources.FirstOrDefault(s => string.Equals(s.Id, itemSourceId, StringComparison.OrdinalIgnoreCase))
+            : null;
+
+        if (original is null || !PreparedMedia.IsReplaceable(original))
+        {
+            _preparedMediaStore.SetServing(clientIp, item.Id, false);
+            return;
+        }
+
+        if (item is Episode episode && !episode.SeriesId.IsEmpty()
+            && original.VideoStream is { } video
+            && User.GetDeviceId() is { } deviceId)
+        {
+            _preparedMediaStore.RecordTranscode(deviceId, User.GetUserId(), episode.SeriesId, PreparedMedia.Signature(video));
+        }
+
+        var prepared = _preparedMediaStore.GetPreparedSource(original);
+        if (prepared is not null)
+        {
+            setDeviceData(prepared);
+        }
+
+        if (prepared is null || !prepared.SupportsDirectPlay)
+        {
+            _preparedMediaStore.SetServing(clientIp, item.Id, false);
+            return;
+        }
+
+        _logger.LogInformation("Serving the prepared copy of {Item} to {Client} as direct play", item.Name, clientIp);
+        info.MediaSources = [prepared];
+        _preparedMediaStore.SetServing(clientIp, item.Id, true);
     }
 }
