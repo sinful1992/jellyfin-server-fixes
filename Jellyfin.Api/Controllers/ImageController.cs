@@ -42,6 +42,11 @@ namespace Jellyfin.Api.Controllers;
 [Route("")]
 public class ImageController : BaseJellyfinApiController
 {
+    /// <summary>
+    /// The quality used for a resized image when the request names none.
+    /// </summary>
+    public const int DefaultResizeQuality = 80;
+
     private readonly IUserManager _userManager;
     private readonly ILibraryManager _libraryManager;
     private readonly IProviderManager _providerManager;
@@ -50,6 +55,7 @@ public class ImageController : BaseJellyfinApiController
     private readonly ILogger<ImageController> _logger;
     private readonly IServerConfigurationManager _serverConfigurationManager;
     private readonly IApplicationPaths _appPaths;
+    private readonly IImageShapeTracker _imageShapeTracker;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ImageController"/> class.
@@ -62,6 +68,7 @@ public class ImageController : BaseJellyfinApiController
     /// <param name="logger">Instance of the <see cref="ILogger{ImageController}"/> interface.</param>
     /// <param name="serverConfigurationManager">Instance of the <see cref="IServerConfigurationManager"/> interface.</param>
     /// <param name="appPaths">Instance of the <see cref="IApplicationPaths"/> interface.</param>
+    /// <param name="imageShapeTracker">Instance of the <see cref="IImageShapeTracker"/> interface.</param>
     public ImageController(
         IUserManager userManager,
         ILibraryManager libraryManager,
@@ -70,7 +77,8 @@ public class ImageController : BaseJellyfinApiController
         IFileSystem fileSystem,
         ILogger<ImageController> logger,
         IServerConfigurationManager serverConfigurationManager,
-        IApplicationPaths appPaths)
+        IApplicationPaths appPaths,
+        IImageShapeTracker imageShapeTracker)
     {
         _userManager = userManager;
         _libraryManager = libraryManager;
@@ -80,6 +88,7 @@ public class ImageController : BaseJellyfinApiController
         _logger = logger;
         _serverConfigurationManager = serverConfigurationManager;
         _appPaths = appPaths;
+        _imageShapeTracker = imageShapeTracker;
     }
 
     private static CryptoStream GetFromBase64Stream(Stream inputStream)
@@ -1907,7 +1916,7 @@ public class ImageController : BaseJellyfinApiController
             MaxWidth = maxWidth,
             FillHeight = fillHeight,
             FillWidth = fillWidth,
-            Quality = quality ?? 100,
+            Quality = ResolveQuality(quality, maxWidth, maxHeight, width, height, fillWidth, fillHeight),
             Width = width,
             PercentPlayed = percentPlayed ?? 0,
             UnplayedCount = unplayedCount,
@@ -1917,12 +1926,53 @@ public class ImageController : BaseJellyfinApiController
             SupportedOutputFormats = outputFormats
         };
 
+        if (item is not null
+            && IsResize(maxWidth, maxHeight, width, height, fillWidth, fillHeight)
+            && !percentPlayed.HasValue
+            && !unplayedCount.HasValue
+            && !blur.HasValue
+            && string.IsNullOrEmpty(backgroundColor)
+            && string.IsNullOrEmpty(foregroundLayer)
+            && (imageIndex ?? 0) == 0)
+        {
+            _imageShapeTracker.Record(new ImageShape(
+                item.GetBaseItemKind(),
+                imageType,
+                maxWidth,
+                maxHeight,
+                width,
+                height,
+                fillWidth,
+                fillHeight,
+                options.Quality,
+                string.Join(',', outputFormats)));
+        }
+
         return await GetImageResult(
             options,
             cacheDuration,
             responseHeaders,
             tag).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Gets the quality to encode with. A client that asks for a resized image but names no quality gets
+    /// <see cref="DefaultResizeQuality"/>; at 100 a 300 px poster is ~4x the bytes for no visible gain.
+    /// A request with no resize keeps 100, so the original file is still served untouched.
+    /// </summary>
+    /// <param name="quality">The requested quality.</param>
+    /// <param name="maxWidth">The requested max width.</param>
+    /// <param name="maxHeight">The requested max height.</param>
+    /// <param name="width">The requested width.</param>
+    /// <param name="height">The requested height.</param>
+    /// <param name="fillWidth">The requested fill width.</param>
+    /// <param name="fillHeight">The requested fill height.</param>
+    /// <returns>The quality.</returns>
+    public static int ResolveQuality(int? quality, int? maxWidth, int? maxHeight, int? width, int? height, int? fillWidth, int? fillHeight)
+        => quality ?? (IsResize(maxWidth, maxHeight, width, height, fillWidth, fillHeight) ? DefaultResizeQuality : 100);
+
+    private static bool IsResize(int? maxWidth, int? maxHeight, int? width, int? height, int? fillWidth, int? fillHeight)
+        => maxWidth.HasValue || maxHeight.HasValue || width.HasValue || height.HasValue || fillWidth.HasValue || fillHeight.HasValue;
 
     private ImageFormat[] GetOutputFormats(ImageFormat? format)
     {

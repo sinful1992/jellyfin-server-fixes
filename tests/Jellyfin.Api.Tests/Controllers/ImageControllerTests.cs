@@ -32,4 +32,17 @@ public static class ImageControllerTests
         Assert.False(ImageController.TryGetImageExtensionFromContentType(contentType, out var ex));
         Assert.Null(ex);
     }
+
+    [Theory]
+    [InlineData(null, 200, 300, null, ImageController.DefaultResizeQuality)]
+    [InlineData(null, null, 300, null, ImageController.DefaultResizeQuality)]
+    [InlineData(null, null, null, 24, ImageController.DefaultResizeQuality)]
+    [InlineData(null, null, null, null, 100)]
+    [InlineData(60, 200, 300, null, 60)]
+    [InlineData(85, null, null, null, 85)]
+    [InlineData(100, 200, 300, null, 100)]
+    public static void ResolveQuality_DefaultsOnlyWhenAbsentAndResizing(int? quality, int? maxWidth, int? maxHeight, int? fillHeight, int expected)
+    {
+        Assert.Equal(expected, ImageController.ResolveQuality(quality, maxWidth, maxHeight, null, null, null, fillHeight));
+    }
 }

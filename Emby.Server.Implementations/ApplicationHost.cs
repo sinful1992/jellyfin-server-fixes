@@ -24,6 +24,7 @@ using Emby.Server.Implementations.Data;
 using Emby.Server.Implementations.Devices;
 using Emby.Server.Implementations.Dto;
 using Emby.Server.Implementations.HttpServer.Security;
+using Emby.Server.Implementations.Images;
 using Emby.Server.Implementations.IO;
 using Emby.Server.Implementations.Library;
 using Emby.Server.Implementations.Library.Search;
@@ -593,6 +594,7 @@ namespace Emby.Server.Implementations
             serviceCollection.AddSingleton<IWebSocketManager, WebSocketManager>();
 
             serviceCollection.AddSingleton<IImageProcessor, ImageProcessor>();
+            serviceCollection.AddSingleton<IImageShapeTracker, ImageShapeTracker>();
 
             serviceCollection.AddSingleton<ITVSeriesManager, TVSeriesManager>();
 
