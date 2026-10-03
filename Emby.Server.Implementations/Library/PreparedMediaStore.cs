@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using Jellyfin.Extensions;
 using Jellyfin.Extensions.Json;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.MediaEncoding;
@@ -119,6 +120,12 @@ public sealed class PreparedMediaStore : IPreparedMediaStore
     /// <inheritdoc />
     public void RecordTranscode(string deviceId, Guid userId, Guid seriesId, string signature)
     {
+        // An API key has no user, and the nightly task can only find episodes for a user.
+        if (userId.IsEmpty())
+        {
+            return;
+        }
+
         lock (_devicesLock)
         {
             if (!_devices.TryGetValue(deviceId, out var record))
@@ -140,7 +147,7 @@ public sealed class PreparedMediaStore : IPreparedMediaStore
         lock (_devicesLock)
         {
             var since = _now() - within;
-            return _devices.Values.Where(d => d.LastSeen >= since).ToList();
+            return _devices.Values.Where(d => d.LastSeen >= since && !d.UserId.IsEmpty()).ToList();
         }
     }
 

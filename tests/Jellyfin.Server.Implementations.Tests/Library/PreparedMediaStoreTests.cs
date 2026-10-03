@@ -119,6 +119,20 @@ public sealed class PreparedMediaStoreTests : IDisposable
     }
 
     [Fact]
+    public void RecordTranscode_IgnoresAndHidesRecordsWithNoUser()
+    {
+        var series = Guid.NewGuid();
+        NewStore().RecordTranscode("apikey", Guid.Empty, series, "hevc|10|SDR");
+        Assert.Empty(NewStore().GetDevices(TimeSpan.FromDays(14)));
+
+        // A record saved by an older build without a user must not reach the nightly task.
+        File.WriteAllText(
+            Path.Combine(_dir, "binge-ahead.json"),
+            "[{\"DeviceId\":\"old\",\"UserId\":\"00000000000000000000000000000000\",\"LastSeen\":\"2026-10-03T21:00:00Z\",\"Series\":{}}]");
+        Assert.Empty(NewStore().GetDevices(TimeSpan.FromDays(14)));
+    }
+
+    [Fact]
     public void ListPrepared_ReadsStoredInfo()
     {
         var store = NewStore();
